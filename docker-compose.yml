@@ -1,0 +1,72 @@
+version: "2.1"
+services:
+  zookeeper:
+    image: wurstmeister/zookeeper
+    ports:
+      - "2181:2181"
+  kafka-broker:
+    image: wurstmeister/kafka:2.12-2.0.1
+    ports:
+      - "9092:9092"
+    environment:
+      HOSTNAME_COMMAND: "route -n | awk '/UG[ \t]/{print $$2}'"
+      KAFKA_CREATE_TOPICS: "tweets:1:1"
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+    depends_on:
+      - zookeeper
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+  producer-worker:
+    build:
+      context: ./generator
+    depends_on:
+      - kafka-broker
+  consumer-worker:
+    build:
+      context: ./logger
+    depends_on:
+      - kafka-broker
+  # kafdrop:
+  #   image: obsidiandynamics/kafdrop
+  #   restart: "no"
+  #   ports:
+  #     - "9000:9000"
+  #   environment:
+  #     KAFKA_BROKERCONNECT: "kafka-broker:9092"
+  #   depends_on:
+  #     - kafka-broker
+  spark-master:
+    image: bde2020/spark-master:3.0.1-hadoop3.2
+    container_name: spark-master
+    depends_on:
+      - producer-worker
+    ports:
+      - "8080:8080"
+      - "7077:7077"
+    environment:
+      - ENABLE_INIT_DAEMON=false
+  spark-worker-1:
+    image: bde2020/spark-worker:3.0.1-hadoop3.2
+    container_name: spark-worker-1
+    depends_on:
+      - spark-master
+    ports:
+      - "8082:8081"
+    environment:
+      - "SPARK_MASTER=spark://spark-master:7077"
+  spark-worker-2:
+    image: bde2020/spark-worker:3.0.1-hadoop3.2
+    container_name: spark-worker-2
+    depends_on:
+      - spark-master
+    ports:
+      - "8083:8081"
+    environment:
+      - "SPARK_MASTER=spark://spark-master:7077"
+  py-spark:
+    build: ./pyspark
+    depends_on:
+      - spark-master
+    environment:
+      - ENABLE_INIT_DAEMON=false
+      - "SPARK_MASTER=spark://spark-master:7077"
